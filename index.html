@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>麻將計分器</title>
+  <meta name="description" content="台灣 16 張麻將計分器（3 底 1 台、莊連拉、自摸逐家計算）">
+  <meta name="theme-color" content="#0f5c45" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b1f19" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="麻將計分">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* 避免深色模式載入時白色閃屏（CSS 檔載入前就生效） */
+    html { background: #f2f4f3; }
+    @media (prefers-color-scheme: dark) { html { background: #0e1513; color: #e9efec; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-row">
+      <h1 class="title">🀄 麻將計分器</h1>
+      <div class="round" id="roundLabel">第 1 局</div>
+    </div>
+    <div class="subtitle">3 底・1 台・莊 1 連 N 拉 N</div>
+  </header>
+
+  <main id="app">
+    <noscript><p class="fatal">請開啟 JavaScript 才能使用。</p></noscript>
+
+    <div id="sumWarning" class="warn" hidden></div>
+
+    <section class="board" id="board" aria-label="目前分數"></section>
+
+    <section class="card dealer-card" aria-label="莊家資訊">
+      <div class="dealer-main" id="dealerLine">莊家：—</div>
+      <div class="stepper" role="group" aria-label="手動連莊">
+        <button type="button" class="step-btn" data-action="streak-dec" aria-label="連莊減一">−</button>
+        <div class="step-value">
+          <div id="streakValue">連 0 拉 0</div>
+          <div class="bonus" id="bonusLine">莊家相關 +1 台</div>
+        </div>
+        <button type="button" class="step-btn" data-action="streak-inc" aria-label="連莊加一">+</button>
+      </div>
+    </section>
+
+    <section class="card play-card" aria-label="本局">
+      <div class="seg mode-seg" role="group" aria-label="胡牌方式">
+        <button type="button" class="seg-btn" data-action="mode" data-value="discard">放槍</button>
+        <button type="button" class="seg-btn" data-action="mode" data-value="selfDraw">自摸</button>
+        <button type="button" class="seg-btn seg-small" data-action="mode" data-value="draw">流局</button>
+      </div>
+
+      <div id="winnerBlock" class="block">
+        <div class="label">胡牌者</div>
+        <div class="pgrid" id="winnerBtns"></div>
+      </div>
+
+      <div id="loserBlock" class="block">
+        <div class="label">放槍者</div>
+        <div class="pgrid" id="loserBtns"></div>
+      </div>
+
+      <div id="taiBlock" class="block">
+        <div class="label">台數（不含莊連拉）</div>
+        <div class="stepper big">
+          <button type="button" class="step-btn" data-action="tai-dec" aria-label="台數減一">−</button>
+          <label class="tai-field">
+            <input id="taiInput" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" enterkeyhint="done" aria-label="台數" value="0">
+            <span>台</span>
+          </label>
+          <button type="button" class="step-btn" data-action="tai-inc" aria-label="台數加一">+</button>
+        </div>
+      </div>
+
+      <div class="preview" id="preview" aria-live="polite"></div>
+
+      <button type="button" class="primary-btn" id="settleBtn" data-action="settle" disabled>確認結算</button>
+    </section>
+
+    <section class="tools" aria-label="設定與紀錄">
+      <h2 class="tools-title">設定與紀錄</h2>
+
+      <div class="row2">
+        <button type="button" class="btn" id="undoBtn" data-action="undo">↶ 復原上一步</button>
+        <button type="button" class="btn" id="redoBtn" data-action="redo">↷ 重做</button>
+      </div>
+      <div class="hint" id="undoHint"></div>
+
+      <details class="panel" id="historyPanel">
+        <summary>歷史紀錄 <span class="count" id="historyCount">0</span></summary>
+        <div id="historyList" class="history"></div>
+      </details>
+
+      <details class="panel" id="fixPanel">
+        <summary>手動分數修正</summary>
+        <div class="seg fix-seg" role="group" aria-label="修正模式">
+          <button type="button" class="seg-btn" data-action="fix-mode" data-value="set">設定總分</button>
+          <button type="button" class="seg-btn" data-action="fix-mode" data-value="adjust">加減調整</button>
+        </div>
+        <p class="hint" id="fixHint"></p>
+        <div id="fixRows" class="fix-rows"></div>
+        <div class="fix-sum" id="fixSum"></div>
+        <button type="button" class="btn btn-accent" id="fixApply" data-action="fix-apply">套用</button>
+      </details>
+
+      <details class="panel" id="dealerPanel">
+        <summary>更換莊家</summary>
+        <p class="hint" id="dealerHint">點選玩家設為莊家（東），座位依原始順序重排，連莊歸零。</p>
+        <div class="pgrid" id="dealerBtns"></div>
+      </details>
+
+      <details class="panel" id="namesPanel">
+        <summary>玩家名稱</summary>
+        <div id="nameRows" class="fix-rows"></div>
+        <button type="button" class="btn btn-accent" data-action="names-save">儲存名稱</button>
+      </details>
+
+      <details class="panel" id="exportPanel">
+        <summary>匯出／備份</summary>
+        <p class="hint">將目前分數與所有歷史紀錄複製成文字，可貼到 LINE 或備忘錄保存。</p>
+        <button type="button" class="btn btn-accent" data-action="export">複製紀錄文字</button>
+        <textarea id="exportText" class="export-text" readonly hidden aria-label="匯出文字"></textarea>
+      </details>
+
+      <details class="panel danger-panel" id="resetPanel">
+        <summary>重開一桌</summary>
+        <p class="hint">清除分數、歷史、莊家、連拉與局數（玩家名稱保留）。</p>
+        <button type="button" class="btn btn-danger" data-action="reset">重開一桌</button>
+      </details>
+
+      <p class="footer">資料只儲存在這支手機的瀏覽器中・v1</p>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden role="status" aria-live="polite">
+    <span id="toastText"></span>
+    <button type="button" id="toastAction" class="toast-action" data-action="toast-action" hidden>復原</button>
+  </div>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-title" id="modalTitle"></div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="row2">
+        <button type="button" class="btn" data-action="modal-cancel">取消</button>
+        <button type="button" class="btn btn-accent" id="modalOk" data-action="modal-ok">確定</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
