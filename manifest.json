@@ -1,7 +1,7 @@
 {
   "name": "台灣麻將計分器",
   "short_name": "麻將計分",
-  "description": "台灣 16 張麻將計分器：3 底 1 台、莊 1 連 N 拉 N、自摸逐家計算",
+  "description": "台灣 16 張麻將計分器：可設定底／台、莊 1 連 N 拉 N、自摸逐家計算",
   "lang": "zh-Hant-TW",
   "start_url": "./",
   "scope": "./",

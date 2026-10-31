@@ -2,9 +2,16 @@
 
 四人現場記帳用的 iPhone Safari Web App。純靜態（HTML + CSS + JS），不需登入、後端或 build，所有資料存在瀏覽器 `localStorage`。
 
-## 計分規則（固定）
+## 計分規則
 
-- **3 底 1 台**：每筆付款 = `3 + 台數`
+- **底與每台金額可設定**（預設 3 底 1 台）。每筆付款：
+
+  ```
+  付款 = 底 + (牌型台數 + 莊家相關台數〔莊家有參與時〕) × 每台
+  ```
+
+  例：50 底 20 台，閒胡閒 5 台 = 50 + 5×20 = 150；莊家連二（+5 台）自摸 5 台，每家付 50 + 10×20 = 250，莊家 +750。
+- 點標題列的「X 底・Y 台／修改」可修改：底 ≥ 0、每台 > 0，整數或 1 位小數。牌局進行中修改會先確認；**過去的局不重算**，只影響之後的結算，可用「復原上一步」還原。每筆歷史紀錄都會記下當時的底／台。
 - **莊 1、連 N、拉 N**：只要付款的任一方是莊家，加上莊家相關台數 `1 + 2N`（N = 連莊數）。莊家贏或莊家付都要加。
 - **自摸逐家計算**：莊家那一份可能不同（閒家自摸時莊家多付；莊家自摸時三家都加）。
 - **連莊**：莊家胡牌／自摸 → 繼續坐莊，N + 1。
@@ -24,7 +31,7 @@
 - 重開一桌（需確認；清除前另存一份到 `mahjongCounter.game.v1.lastReset`）
 - 深色模式、Safe Area（Dynamic Island / Home Indicator）、PWA（加入主畫面）
 - 螢幕常亮（支援 Wake Lock 的瀏覽器，iOS 16.4+）
-- 資料含 `version`，所有 JSON 解析皆 try/catch；損毀資料會自動修復並另存備份，不會白屏
+- 資料含 `version`（目前 v2；v1 舊資料自動遷移為 3 底 1 台），所有 JSON 解析皆 try/catch；損毀資料會自動修復並另存備份，不會白屏
 
 ## 檔案
 
@@ -35,7 +42,7 @@
 | `core.js` | 純計算核心：`calculateSettlement`、`nextDealerState`、`seatOrder`、`reduce`（含 undo/redo）、資料遷移。瀏覽器為 `window.MahjongCore`，Node 可 `require` |
 | `app.js` | UI 與 localStorage |
 | `manifest.json`、`icon-192.png`、`icon-512.png`、`apple-touch-icon.png` | PWA 與圖示 |
-| `tests/core.test.js` | 計算核心測試（規格 Case 1–10、流局、多步 Undo/Redo 等） |
+| `tests/core.test.js` | 計算核心測試（規格 Case 1–10、流局、多步 Undo/Redo、可設定底／台、v1→v2 遷移等） |
 | `tests/e2e.js` | Playwright 瀏覽器測試（iPhone 14 模擬） |
 
 所有路徑皆為相對路徑，可部署在 GitHub Pages 子路徑（例如 `https://<user>.github.io/mahjong-counter/`）。

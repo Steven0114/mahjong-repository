@@ -25,7 +25,9 @@
   function nm(i) { return game && game.names && game.names[i] != null ? game.names[i] : '?'; }
   function signed(n) { return C.formatSigned(n); }
   function cls(n) { return n > 0 ? 'pos' : (n < 0 ? 'neg' : 'zero'); }
-  function sumOf(a) { return a.reduce(function (x, y) { return x + y; }, 0); }
+  function sumOf(a) { return C.round1(a.reduce(function (x, y) { return x + y; }, 0)); }
+  function num(n) { return C.fmtNum(n); }
+  function entryRules(e) { return C.rulesText(e.base != null ? e.base : C.BASE, e.perTai != null ? e.perTai : C.PER_TAI); }
   function streakText(n, sep) { return '連 ' + n + (sep || '・') + '拉 ' + n; }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function fmtTime(ts) {
@@ -103,6 +105,7 @@
 
   function renderHeader() {
     setText('roundLabel', '第 ' + game.round + ' 局');
+    setText('rulesLabel', C.rulesText(game.base, game.perTai));
     var w = $('sumWarning');
     if (w) {
       var s = sumOf(game.scores);
@@ -190,7 +193,12 @@
         var label = esc(nm(p)) + (p === game.dealer ? '（莊・連' + n + '拉' + n + '）' : '');
         var pay = null;
         for (var q = 0; q < calc.payments.length; q++) if (calc.payments[q].from === p) pay = calc.payments[q];
-        var detail = pay ? '<span class="calc">3+' + calc.tai + (pay.dealerInvolved ? '+' + calc.bonusTai : '') + '</span>' : '';
+        var detail = '';
+        if (pay) {
+          var taiPart = calc.tai + (pay.dealerInvolved ? '+' + calc.bonusTai : '');
+          detail = '<span class="calc">' + num(calc.base) + '+' + (calc.perTai === 1 ? taiPart
+            : (pay.dealerInvolved ? '(' + taiPart + ')' : taiPart) + '×' + num(calc.perTai)) + '</span>';
+        }
         h += '<div class="pv-line"><span>' + label + detail + '</span><span class="amt ' + cls(d) + '">' + signed(d) + '</span></div>';
       }
       var nx = C.nextDealerState(game, { type: ui.mode, winner: ui.winner });
@@ -222,7 +230,7 @@
     var fb = document.querySelectorAll('[data-action="fix-mode"]');
     for (var k = 0; k < fb.length; k++) fb[k].classList.toggle('on', fb[k].getAttribute('data-value') === ui.fixMode);
     setText('fixHint', ui.fixMode === 'set'
-      ? '直接把四人「目前總分」改成輸入的數字。負數請按 ± 切換。'
+      ? '直接把四人「目前總分」改成輸入的數字（可 1 位小數）。負數請按 ± 切換。'
       : '在目前分數上「再加減」輸入的數字（例：+5 代表加 5）。負數請按 ± 切換。');
     if (!fixDirty) renderFixRows();
   }
@@ -241,18 +249,22 @@
     var time = '<span class="h-time">' + fmtTime(e.ts) + '</span>';
     if (e.kind === 'settle') {
       head = '第 ' + e.round + ' 局';
-      meta = '莊：' + esc(nm(e.dealer)) + '｜' + streakText(e.streak, ' ');
+      meta = '莊：' + esc(nm(e.dealer)) + '｜' + streakText(e.streak, ' ') + '｜' + entryRules(e);
       main = e.mode === 'selfDraw'
         ? esc(nm(e.winner)) + ' 自摸 ' + e.tai + ' 台'
         : esc(nm(e.winner)) + ' 胡 ' + esc(nm(e.loser)) + ' ' + e.tai + ' 台';
       main += e.bonusTai ? '（莊相關 +' + e.bonusTai + ' 台）' : '（無莊家交易）';
     } else if (e.kind === 'draw') {
       head = '第 ' + e.round + ' 局';
-      meta = '莊：' + esc(nm(e.dealer)) + '｜' + streakText(e.streak, ' ');
+      meta = '莊：' + esc(nm(e.dealer)) + '｜' + streakText(e.streak, ' ') + '｜' + entryRules(e);
       main = '流局（莊家連莊 → 連 ' + (e.streak + 1) + ' 拉 ' + (e.streak + 1) + '）';
     } else if (e.kind === 'setScores' || e.kind === 'adjust') {
       head = e.kind === 'setScores' ? '手動設定總分' : '分數加減調整';
       meta = '第 ' + e.round + ' 局前';
+    } else if (e.kind === 'rules') {
+      head = '修改底／每台';
+      meta = '第 ' + e.round + ' 局起適用（過去不重算）';
+      main = C.rulesText(e.fromBase, e.fromPerTai) + ' → ' + C.rulesText(e.base, e.perTai);
     } else if (e.kind === 'dealer') {
       head = '更換莊家';
       main = esc(nm(e.fromDealer)) + ' → ' + esc(nm(e.toDealer)) + '（原連 ' + (e.fromStreak || 0) + '，改為連 0）';
@@ -297,8 +309,8 @@
     s = String(s == null ? '' : s).trim().replace(/[−－﹣–—]/g, '-').replace(/[＋]/g, '+').replace(/\s+/g, '');
     s = s.replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
     if (s === '' || s === '-' || s === '+') return emptyVal;
-    if (!/^[+-]?\d{1,7}$/.test(s)) return NaN;
-    return parseInt(s, 10);
+    if (!/^[+-]?\d{1,9}(\.\d)?$/.test(s)) return NaN;
+    return C.round1(parseFloat(s));
   }
 
   function readFix() {
@@ -317,11 +329,84 @@
     var r = readFix();
     var el = $('fixSum');
     if (!el) return;
-    if (!r.ok) { el.innerHTML = '<span class="neg">請輸入整數（可為負數）</span>'; return; }
-    var target = ui.fixMode === 'set' ? r.vals : game.scores.map(function (s, i) { return s + r.vals[i]; });
+    if (!r.ok) { el.innerHTML = '<span class="neg">請輸入數字（可為負數、最多 1 位小數）</span>'; return; }
+    var target = ui.fixMode === 'set' ? r.vals : game.scores.map(function (s, i) { return C.round1(s + r.vals[i]); });
     var s = sumOf(target);
     el.innerHTML = (ui.fixMode === 'set' ? '合計：' : '調整後合計：') +
       (s === 0 ? '<span class="pos">0 ✓</span>' : '<span class="neg">' + signed(s) + ' ⚠️ 並非 0</span>');
+  }
+
+  /* ---------------- 底／每台 編輯 ---------------- */
+  function parseRuleInput(v) {
+    var s = String(v == null ? '' : v).trim().replace(/[０-９．]/g, function (c) {
+      return c === '．' ? '.' : String.fromCharCode(c.charCodeAt(0) - 0xFEE0);
+    });
+    if (!/^\d{1,7}(\.\d)?$/.test(s)) return NaN;
+    return C.round1(parseFloat(s));
+  }
+  function readRules() {
+    var bi = $('rulesBase'), pi = $('rulesPerTai');
+    var b = parseRuleInput(bi ? bi.value : ''), p = parseRuleInput(pi ? pi.value : '');
+    var bOk = Number.isFinite(b) && b >= 0, pOk = Number.isFinite(p) && p > 0;
+    if (bi) bi.classList.toggle('bad', !bOk);
+    if (pi) pi.classList.toggle('bad', !pOk);
+    return { ok: bOk && pOk && C.validRules(b, p), base: b, perTai: p, bOk: bOk, pOk: pOk };
+  }
+  function updateRulesPreview() {
+    var r = readRules();
+    var el = $('rulesPreview'), ap = $('rulesApply');
+    if (ap) ap.disabled = !r.ok;
+    var bs = document.querySelectorAll('[data-action="rules-step"][data-d="-1"]');
+    for (var k = 0; k < bs.length; k++) {
+      var f = bs[k].getAttribute('data-field');
+      bs[k].disabled = f === 'base' ? !(r.bOk && r.base >= 1) : !(r.pOk && r.perTai > 1);
+    }
+    if (!el) return;
+    if (!r.ok) {
+      el.innerHTML = '<div class="pv-hint neg">' + (!r.bOk ? '底需為 ≥ 0 的數字（最多 1 位小數）' : '每台需為 > 0 的數字（最多 1 位小數）') + '</div>';
+      return;
+    }
+    var pay = function (t) { return num(C.round1(r.base + t * r.perTai)); };
+    var bonus = C.dealerBonusTai(game.streak);
+    el.innerHTML = '<div class="pv-title">' + C.rulesText(r.base, r.perTai) + '</div>' +
+      '<div class="pv-line"><span>閒家互胡 5 台</span><span class="amt">' + pay(5) + '</span></div>' +
+      '<div class="pv-line"><span>與莊家（目前 +' + bonus + ' 台）5 台</span><span class="amt">' + pay(5 + bonus) + '</span></div>' +
+      '<div class="pv-next">每筆 = 底 + (台數 + 莊家相關台數) × 每台</div>';
+  }
+  function openRules() {
+    var bi = $('rulesBase'), pi = $('rulesPerTai'), m = $('rulesModal');
+    if (!m) return;
+    if (bi) bi.value = num(game.base);
+    if (pi) pi.value = num(game.perTai);
+    m.hidden = false;
+    updateRulesPreview();
+  }
+  function closeRules() { var m = $('rulesModal'); if (m) m.hidden = true; }
+  function stepRules(field, d) {
+    var el = $(field === 'base' ? 'rulesBase' : 'rulesPerTai');
+    if (!el) return;
+    var v = parseRuleInput(el.value);
+    if (!Number.isFinite(v)) v = field === 'base' ? C.BASE : C.PER_TAI;
+    var nv = C.round1(v + d);
+    if (field === 'base' && nv < 0) nv = 0;
+    if (field === 'perTai' && nv <= 0) return;
+    el.value = num(nv);
+    updateRulesPreview();
+  }
+  function applyRules() {
+    var r = readRules();
+    if (!r.ok) { updateRulesPreview(); return; }
+    if (r.base === game.base && r.perTai === game.perTai) { closeRules(); return; }
+    var text = C.rulesText(r.base, r.perTai);
+    var doIt = function () {
+      if (dispatch({ type: 'SET_RULES', base: r.base, perTai: r.perTai, ts: Date.now() })) showToast('已改為 ' + text, true);
+    };
+    closeRules();
+    var inProgress = game.round > 1 || game.scores.some(function (x) { return x !== 0; });
+    if (!inProgress) { doIt(); return; }
+    confirmModal('確定改為 ' + text + '？',
+      '目前為 ' + C.rulesText(game.base, game.perTai) + '，牌局進行中。<br><b>過去的局不會重新計算</b>，只影響之後的結算。<br>之後可用「復原上一步」還原。',
+      '確定修改').then(function (yes) { if (yes) doIt(); });
   }
 
   /* ---------------- Toast / Modal ---------------- */
@@ -393,9 +478,9 @@
 
   function doFixApply() {
     var r = readFix();
-    if (!r.ok) { updateFixSum(); showToast('請輸入整數（負數請按 ±）'); return; }
+    if (!r.ok) { updateFixSum(); showToast('請輸入數字（負數請按 ±）'); return; }
     var isSet = ui.fixMode === 'set';
-    var target = isSet ? r.vals : game.scores.map(function (s, i) { return s + r.vals[i]; });
+    var target = isSet ? r.vals : game.scores.map(function (s, i) { return C.round1(s + r.vals[i]); });
     var changed = target.some(function (v, i) { return v !== game.scores[i]; });
     if (!changed) { showToast('分數沒有變更'); return; }
     var body = '';
@@ -433,7 +518,7 @@
   function buildExportText() {
     var L = [];
     var now = new Date();
-    L.push('🀄 麻將計分器紀錄（3 底 1 台）');
+    L.push('🀄 麻將計分器紀錄（目前 ' + C.rulesText(game.base, game.perTai) + '）');
     L.push('匯出時間：' + now.getFullYear() + '/' + fmtTime(now.getTime()));
     L.push('目前：第 ' + game.round + ' 局｜莊：' + nm(game.dealer) + '｜連 ' + game.streak + ' 拉 ' + game.streak);
     L.push('');
@@ -449,13 +534,15 @@
       if (e.kind === 'settle') {
         line = '第 ' + e.round + ' 局｜莊 ' + nm(e.dealer) + ' 連' + e.streak + '拉' + e.streak + '｜' +
           (e.mode === 'selfDraw' ? nm(e.winner) + ' 自摸' : nm(e.winner) + ' 胡 ' + nm(e.loser)) + ' ' + e.tai + ' 台' +
-          (e.bonusTai ? '（莊相關 +' + e.bonusTai + '）' : '') + '｜' + d;
+          (e.bonusTai ? '（莊相關 +' + e.bonusTai + '）' : '') + '｜' + entryRules(e) + '｜' + d;
       } else if (e.kind === 'draw') {
         line = '第 ' + e.round + ' 局｜莊 ' + nm(e.dealer) + ' 連' + e.streak + '拉' + e.streak + '｜流局';
       } else if (e.kind === 'setScores') {
         line = '手動設定總分｜' + d;
       } else if (e.kind === 'adjust') {
         line = '分數調整｜' + d;
+      } else if (e.kind === 'rules') {
+        line = '修改底／每台｜' + C.rulesText(e.fromBase, e.fromPerTai) + ' → ' + C.rulesText(e.base, e.perTai);
       } else if (e.kind === 'dealer') {
         line = '更換莊家｜' + nm(e.fromDealer) + ' → ' + nm(e.toDealer);
       }
@@ -546,6 +633,10 @@
       case 'names-save': doSaveNames(); break;
       case 'export': doExport(); break;
       case 'reset': doReset(); break;
+      case 'rules-open': openRules(); break;
+      case 'rules-cancel': closeRules(); break;
+      case 'rules-apply': applyRules(); break;
+      case 'rules-step': stepRules(el.getAttribute('data-field'), C.toInt(el.getAttribute('data-d'), 0)); break;
       case 'modal-ok': closeModal(true); break;
       case 'modal-cancel': closeModal(false); break;
       default: break;
@@ -562,6 +653,8 @@
       saveUI(); renderPlay();
     } else if (t.hasAttribute && t.hasAttribute('data-fix')) {
       fixDirty = true; updateFixSum();
+    } else if (t.hasAttribute && t.hasAttribute('data-rules')) {
+      updateRulesPreview();
     }
   }
 
@@ -608,7 +701,7 @@
     document.addEventListener('input', onInput);
     document.addEventListener('focusin', function (ev) {
       var t = ev.target;
-      if (t && (t.id === 'taiInput' || (t.hasAttribute && t.hasAttribute('data-fix')))) {
+      if (t && (t.id === 'taiInput' || (t.hasAttribute && (t.hasAttribute('data-fix') || t.hasAttribute('data-rules'))))) {
         selectAll(t);
         setTimeout(function () { if (document.activeElement === t) selectAll(t); }, 0); // iOS Safari
       }
@@ -619,9 +712,13 @@
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter' && ev.target && ev.target.id === 'taiInput') ev.target.blur();
       if (ev.key === 'Escape' && modalResolve) closeModal(false);
+      else if (ev.key === 'Escape') closeRules();
+      if (ev.key === 'Enter' && ev.target && ev.target.hasAttribute && ev.target.hasAttribute('data-rules')) ev.target.blur();
     });
     var modal = $('modal');
     if (modal) modal.addEventListener('click', function (ev) { if (ev.target === modal) closeModal(false); });
+    var rm = $('rulesModal');
+    if (rm) rm.addEventListener('click', function (ev) { if (ev.target === rm) closeRules(); });
     var hp = $('historyPanel');
     if (hp) hp.addEventListener('toggle', renderHistory);
     var fp = $('fixPanel');

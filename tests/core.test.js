@@ -196,6 +196,104 @@ test('損毀資料：壞 JSON / 錯誤結構 不丟例外並回到可用狀態',
   assert.deepStrictEqual(r.game.scores, [1, 2, 3, -6]); assert.strictEqual(r.game.dealer, 2); assert.ok(r.repaired);
 });
 
+// ---------------- v2：可設定底／每台 ----------------
+const R = { base: 50, perTai: 20 };
+test('底50 每台20：閒胡閒 5 台 → 150', () => {
+  const r = C.calculateSettlement({ dealer: D, streak: 0, ...R }, { type: 'discard', winner: A, loser: B, tai: 5 });
+  assert.deepStrictEqual(r.deltas, [150, -150, 0, 0]);
+});
+
+test('底50 每台20：莊連二自摸 5 台 → 每家 50+10×20=250，莊 +750', () => {
+  const r = C.calculateSettlement({ dealer: A, streak: 2, ...R }, { type: 'selfDraw', winner: A, tai: 5 });
+  assert.deepStrictEqual(r.deltas, [750, -250, -250, -250]);
+});
+
+test('底50 每台20：閒自摸（莊連二）→ 莊付 250、其他 150', () => {
+  const r = C.calculateSettlement({ dealer: A, streak: 2, ...R }, { type: 'selfDraw', winner: B, tai: 5 });
+  assert.deepStrictEqual(r.deltas, [-250, 550, -150, -150]);
+  assert.strictEqual(sum(r.deltas), 0);
+});
+
+test('底50 每台20：閒胡莊（連二）5 台 → 250', () => {
+  const r = C.calculateSettlement({ dealer: A, streak: 2, ...R }, { type: 'discard', winner: B, loser: A, tai: 5 });
+  assert.deepStrictEqual(r.deltas, [-250, 250, 0, 0]);
+});
+
+test('小數：底 0.5 每台 0.1，莊連1 自摸 2 台 → 每家 0.5+(2+3)×0.1=1，無浮點誤差', () => {
+  const r = C.calculateSettlement({ dealer: A, streak: 1, base: 0.5, perTai: 0.1 }, { type: 'selfDraw', winner: A, tai: 2 });
+  assert.deepStrictEqual(r.deltas, [3, -1, -1, -1]);
+  const r2 = C.calculateSettlement({ dealer: A, streak: 0, base: 0.3, perTai: 0.1 }, { type: 'selfDraw', winner: B, tai: 1 });
+  assert.deepStrictEqual(r2.deltas, [-0.5, 1.3, -0.4, -0.4]); // 莊付 0.3+2×0.1，閒付 0.3+0.1
+  assert.strictEqual(C.formatSigned(1.3), '+1.3');
+  assert.strictEqual(C.formatSigned(-0.5), '-0.5');
+});
+
+test('SET_RULES：驗證（底≥0、每台>0、最多 1 位小數）', () => {
+  const g = C.createInitialGame();
+  assert.strictEqual(g.base, 3); assert.strictEqual(g.perTai, 1);
+  assert.strictEqual(C.reduce(g, { type: 'SET_RULES', base: 5, perTai: 0 }), g);
+  assert.strictEqual(C.reduce(g, { type: 'SET_RULES', base: -1, perTai: 1 }), g);
+  assert.strictEqual(C.reduce(g, { type: 'SET_RULES', base: 1.25, perTai: 1 }), g);
+  assert.strictEqual(C.reduce(g, { type: 'SET_RULES', base: 'x', perTai: 1 }), g);
+  assert.strictEqual(C.reduce(g, { type: 'SET_RULES', base: 3, perTai: 1 }), g); // 無變更
+  const g2 = C.reduce(g, { type: 'SET_RULES', base: 0, perTai: 0.5 });
+  assert.strictEqual(g2.base, 0); assert.strictEqual(g2.perTai, 0.5);
+});
+
+test('SET_RULES → 結算使用新值、歷史記錄當時底/台、Undo 恢復設定、Redo 再套用', () => {
+  let g = C.createInitialGame(); // 莊 A 連0
+  g = C.reduce(g, { type: 'SETTLE', mode: 'discard', winner: B, loser: Cc, tai: 5 }); // 3+5=8；莊換 B
+  assert.deepStrictEqual(g.scores, [0, 8, -8, 0]);
+  g = C.reduce(g, { type: 'SET_RULES', base: 50, perTai: 20 });
+  assert.strictEqual(g.history[g.history.length - 1].kind, 'rules');
+  assert.deepStrictEqual(g.scores, [0, 8, -8, 0]); // 不重算過去
+  g = C.reduce(g, { type: 'SETTLE', mode: 'discard', winner: A, loser: D, tai: 5 }); // 閒胡閒 → 150
+  assert.deepStrictEqual(g.scores, [150, 8, -8, -150]);
+  const settles = g.history.filter(e => e.kind === 'settle');
+  assert.deepStrictEqual(settles.map(e => [e.base, e.perTai]), [[3, 1], [50, 20]]);
+  g = C.reduce(g, { type: 'UNDO' }); // 回到設定後
+  assert.strictEqual(g.base, 50);
+  g = C.reduce(g, { type: 'UNDO' }); // 撤銷設定
+  assert.strictEqual(g.base, 3); assert.strictEqual(g.perTai, 1);
+  assert.deepStrictEqual(g.scores, [0, 8, -8, 0]);
+  assert.strictEqual(g.history.length, 1);
+  g = C.reduce(g, { type: 'REDO' });
+  assert.strictEqual(g.base, 50); assert.strictEqual(g.perTai, 20);
+  // 存取後保留
+  const re = C.parseGameJSON(JSON.stringify(g));
+  assert.strictEqual(re.repaired, false);
+  assert.deepStrictEqual(re.game, g);
+  assert.strictEqual(re.game.version, 2);
+});
+
+test('v1 → v2 遷移：補 base=3/perTai=1（狀態、歷史、undo 快照），Undo 仍可用', () => {
+  const v1 = {
+    version: 1, names: ['Steven', '豐', '詠', '美女'], scores: [13, -13, 0, 0], dealer: 1, streak: 0, round: 2, seq: 1,
+    history: [{ id: 1, kind: 'settle', round: 1, mode: 'discard', dealer: 0, streak: 0, winner: 0, loser: 1, tai: 4, bonusTai: 1, deltas: [8, -8, 0, 0], scoresAfter: [8, -8, 0, 0], ts: 1 }],
+    undoStack: [{ label: '第 1 局結算', before: { scores: [5, -5, 0, 0], dealer: 0, streak: 0, round: 1 }, after: { scores: [13, -13, 0, 0], dealer: 1, streak: 0, round: 2 }, entry: { id: 1, kind: 'settle', round: 1 } }],
+    redoStack: []
+  };
+  const r = C.parseGameJSON(JSON.stringify(v1));
+  assert.strictEqual(r.repaired, false);
+  const g = r.game;
+  assert.strictEqual(g.version, 2); assert.strictEqual(g.base, 3); assert.strictEqual(g.perTai, 1);
+  assert.deepStrictEqual(g.scores, [13, -13, 0, 0]);
+  assert.strictEqual(g.history[0].base, 3); assert.strictEqual(g.history[0].perTai, 1);
+  assert.strictEqual(g.undoStack.length, 1);
+  assert.strictEqual(g.undoStack[0].before.base, 3);
+  const u = C.reduce(g, { type: 'UNDO' });
+  assert.deepStrictEqual(u.scores, [5, -5, 0, 0]); assert.strictEqual(u.dealer, 0); assert.strictEqual(u.base, 3);
+  // 遷移後算錢與 v1 相同
+  assert.deepStrictEqual(C.calculateSettlement(g, { type: 'selfDraw', winner: 2, tai: 5 }).deltas, [-8, -9, 25, -8]); // 莊=豐 連0
+});
+
+test('損毀 base/perTai → 回到 3/1，不丟例外', () => {
+  for (const t of ['{"version":2,"base":"abc","perTai":0}', '{"version":2,"base":-5,"perTai":null}', '{"version":2,"base":1e99,"perTai":2}']) {
+    const r = C.parseGameJSON(t);
+    assert.strictEqual(r.game.base, 3); assert.strictEqual(r.game.perTai, 1); assert.ok(r.repaired, t);
+  }
+});
+
 const failed = results.filter(r => !r[1]).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
 process.exit(failed ? 1 : 0);

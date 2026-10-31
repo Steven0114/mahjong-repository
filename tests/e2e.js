@@ -27,6 +27,11 @@ async function step(name, fn) {
   const scores = async () => page.$$eval('#board .pscore', els => els.map(e => e.textContent.trim()));
   const click = sel => page.locator(sel).first().click();
   const pick = (kind, i) => click(`#${kind}Btns [data-i="${i}"]`);
+  // 確保為選取狀態（按鈕為切換式）
+  const ensure = async (kind, i) => {
+    const on = await page.locator(`#${kind}Btns [data-i="${i}"]`).evaluate(e => e.classList.contains('on'));
+    if (!on) await pick(kind, i);
+  };
 
   await step('載入頁面（子路徑）、零 console error、資源 200', async () => {
     await page.goto(BASE, { waitUntil: 'networkidle' });
@@ -162,6 +167,88 @@ async function step(name, fn) {
     assert.match(await page.textContent('#modalTitle'), /確定要清除目前牌局嗎/);
     await click('[data-action="modal-cancel"]');
     assert.deepStrictEqual(await scores(), ['+28', '-12', '+5', '-21']);
+  });
+
+  await step('修改底／每台：50 底 20 台 → 確認 → 結算 150 → reload 保留 → undo', async () => {
+    await page.evaluate(() => window.scrollTo(0, 0));
+    assert.strictEqual(await page.textContent('#rulesLabel'), '3 底・1 台');
+    await click('#rulesBtn');
+    assert.ok(await page.locator('#rulesModal').isVisible());
+    assert.strictEqual(await page.inputValue('#rulesBase'), '3');
+    // 無效值：每台 0 → 不能套用
+    await page.fill('#rulesPerTai', '0');
+    assert.ok(await page.locator('#rulesApply').isDisabled());
+    await page.fill('#rulesPerTai', '1.25');
+    assert.ok(await page.locator('#rulesApply').isDisabled());
+    // stepper + 直接輸入
+    await page.fill('#rulesPerTai', '19');
+    await click('[data-action="rules-step"][data-field="perTai"][data-d="1"]');
+    assert.strictEqual(await page.inputValue('#rulesPerTai'), '20');
+    await page.fill('#rulesBase', '49');
+    await click('[data-action="rules-step"][data-field="base"][data-d="1"]');
+    assert.strictEqual(await page.inputValue('#rulesBase'), '50');
+    assert.ok((await page.textContent('#rulesPreview')).includes('150'));
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await page.screenshot({ path: SHOTS + '/light-rules-editor.png' });
+    await click('#rulesApply');
+    // 牌局進行中 → 需確認
+    assert.ok(await page.locator('#modal').isVisible());
+    assert.match(await page.textContent('#modalBody'), /過去的局不會重新計算/);
+    await click('#modalOk');
+    assert.strictEqual(await page.textContent('#rulesLabel'), '50 底・20 台');
+    // 莊家 = 詠（連0）；Steven 胡 豐（閒胡閒）5 台 → 50 + 5×20 = 150
+    await click('[data-action="mode"][data-value="discard"]');
+    await ensure('winner', 0); await ensure('loser', 1);
+    await page.fill('#taiInput', '5');
+    assert.ok((await page.textContent('#preview')).includes('+150'));
+    await click('#settleBtn');
+    assert.deepStrictEqual(await scores(), ['+178', '-162', '+5', '-21']);
+    // 閒胡 → 莊家換成美女（連0）。詠 自摸 2 台 → 莊 美女付 50+(2+1)×20=110，其他 50+2×20=90
+    assert.match(await page.textContent('#dealerLine'), /美女｜東｜莊/);
+    await click('[data-action="mode"][data-value="selfDraw"]');
+    await ensure('winner', 2); await page.fill('#taiInput', '2');
+    const pv = await page.textContent('#preview');
+    assert.ok(pv.includes('-110') && pv.includes('-90') && pv.includes('+290'), pv);
+    assert.ok((await page.textContent('#bonusLine')).includes('莊家相關 +1 台'));
+    await click('[data-action="mode"][data-value="discard"]'); await pick('winner', 3);
+    await page.reload({ waitUntil: 'networkidle' });
+    assert.strictEqual(await page.textContent('#rulesLabel'), '50 底・20 台');
+    assert.deepStrictEqual(await scores(), ['+178', '-162', '+5', '-21']);
+    await page.locator('#historyPanel').evaluate(d => { d.open = true; });
+    const hist = await page.textContent('#historyList');
+    assert.ok(hist.includes('50 底・20 台') && hist.includes('修改底／每台') && hist.includes('3 底・1 台 → 50 底・20 台'), hist);
+    // Undo 結算、Undo 設定 → 回 3 底 1 台
+    await click('#undoBtn'); await click('#undoBtn');
+    assert.strictEqual(await page.textContent('#rulesLabel'), '3 底・1 台');
+    assert.deepStrictEqual(await scores(), ['+28', '-12', '+5', '-21']);
+    await click('#redoBtn');
+    assert.strictEqual(await page.textContent('#rulesLabel'), '50 底・20 台');
+    await page.reload({ waitUntil: 'networkidle' });
+    assert.strictEqual(await page.textContent('#rulesLabel'), '50 底・20 台');
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(5200);
+    await page.screenshot({ path: SHOTS + '/light-rules-50-20.png' });
+  });
+
+  await step('v1 舊資料載入 → 遷移為 v2（3 底 1 台），不白屏', async () => {
+    const c4 = await browser.newContext({ ...dev });
+    const p4 = await c4.newPage();
+    const errs4 = [];
+    p4.on('pageerror', e => errs4.push(e.message));
+    p4.on('console', m => { if (m.type() === 'error') errs4.push(m.text()); });
+    await p4.goto(new URL('manifest.json', BASE).href);
+    await p4.evaluate(() => localStorage.setItem('mahjongCounter.game.v1', JSON.stringify({
+      version: 1, names: ['Steven', '豐', '詠', '美女'], scores: [28, -12, 5, -21], dealer: 2, streak: 1, round: 5, seq: 0,
+      history: [], undoStack: [], redoStack: []
+    })));
+    await p4.goto(BASE, { waitUntil: 'networkidle' });
+    assert.strictEqual(await p4.textContent('#rulesLabel'), '3 底・1 台');
+    assert.deepStrictEqual(await p4.$$eval('#board .pscore', e => e.map(x => x.textContent)), ['+28', '-12', '+5', '-21']);
+    const v = await p4.evaluate(() => JSON.parse(localStorage.getItem('mahjongCounter.game.v1')));
+    assert.strictEqual(v.version, 2); assert.strictEqual(v.base, 3); assert.strictEqual(v.perTai, 1);
+    assert.ok(await p4.locator('#toast').isHidden(), 'v1 遷移不應顯示損毀提示');
+    assert.deepStrictEqual(errs4, []);
+    await c4.close();
   });
 
   await step('整體 console error 為零', async () => { assert.deepStrictEqual(errors, []); });

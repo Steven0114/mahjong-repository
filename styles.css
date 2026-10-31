@@ -74,7 +74,19 @@ button:disabled { cursor: default; }
 .topbar-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .title { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: .5px; }
 .round { font-size: 18px; font-weight: 700; background: rgba(255,255,255,.16); padding: 4px 12px; border-radius: 999px; white-space: nowrap; }
-.subtitle { font-size: 13px; opacity: .85; margin-top: 2px; }
+.rules-btn {
+  display: flex; align-items: center; gap: 0; width: 100%; min-height: 44px; margin-top: 4px; padding: 0;
+  background: transparent; border: 0; color: inherit; text-align: left; font-size: 15px;
+}
+#rulesLabel { font-weight: 800; font-size: 17px; }
+.rules-sep { opacity: .85; font-size: 13px; }
+.rules-edit {
+  margin-left: auto; font-size: 14px; font-weight: 800; padding: 8px 14px; border-radius: 999px;
+  background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); white-space: nowrap;
+}
+.rules-field input { width: 100%; font-size: 28px; }
+.rules-field input.bad { color: var(--neg); }
+.rules-field:has(input.bad) { border-color: var(--neg); }
 
 main {
   max-width: 560px; margin: 0 auto;

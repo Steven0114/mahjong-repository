@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <title>麻將計分器</title>
-  <meta name="description" content="台灣 16 張麻將計分器（3 底 1 台、莊連拉、自摸逐家計算）">
+  <meta name="description" content="台灣 16 張麻將計分器（可設定底與每台、莊連拉、自摸逐家計算）">
   <meta name="theme-color" content="#0f5c45" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0b1f19" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -29,7 +29,10 @@
       <h1 class="title">🀄 麻將計分器</h1>
       <div class="round" id="roundLabel">第 1 局</div>
     </div>
-    <div class="subtitle">3 底・1 台・莊 1 連 N 拉 N</div>
+    <button type="button" class="rules-btn" id="rulesBtn" data-action="rules-open" aria-label="修改底與每台金額">
+      <span id="rulesLabel">3 底・1 台</span><span class="rules-sep">・莊 1 連 N 拉 N</span>
+      <span class="rules-edit">修改</span>
+    </button>
   </header>
 
   <main id="app">
@@ -136,7 +139,7 @@
         <button type="button" class="btn btn-danger" data-action="reset">重開一桌</button>
       </details>
 
-      <p class="footer">資料只儲存在這支手機的瀏覽器中・v1</p>
+      <p class="footer">資料只儲存在這支手機的瀏覽器中・v2</p>
     </section>
   </main>
 
@@ -152,6 +155,34 @@
       <div class="row2">
         <button type="button" class="btn" data-action="modal-cancel">取消</button>
         <button type="button" class="btn btn-accent" id="modalOk" data-action="modal-ok">確定</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="rulesModal" class="modal" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="rulesTitle">
+      <div class="modal-title" id="rulesTitle">修改底／每台金額</div>
+      <div class="block">
+        <div class="label">底（每筆付款的基本金額）</div>
+        <div class="stepper big">
+          <button type="button" class="step-btn" data-action="rules-step" data-field="base" data-d="-1" aria-label="底減一">−</button>
+          <label class="tai-field rules-field"><input id="rulesBase" data-rules="base" type="text" inputmode="decimal" autocomplete="off" enterkeyhint="done" aria-label="底"></label>
+          <button type="button" class="step-btn" data-action="rules-step" data-field="base" data-d="1" aria-label="底加一">+</button>
+        </div>
+      </div>
+      <div class="block">
+        <div class="label">每台金額</div>
+        <div class="stepper big">
+          <button type="button" class="step-btn" data-action="rules-step" data-field="perTai" data-d="-1" aria-label="每台減一">−</button>
+          <label class="tai-field rules-field"><input id="rulesPerTai" data-rules="perTai" type="text" inputmode="decimal" autocomplete="off" enterkeyhint="done" aria-label="每台金額"></label>
+          <button type="button" class="step-btn" data-action="rules-step" data-field="perTai" data-d="1" aria-label="每台加一">+</button>
+        </div>
+      </div>
+      <div class="preview ready" id="rulesPreview"></div>
+      <p class="hint">底 ≥ 0、每台 &gt; 0，可輸入整數或 1 位小數。只影響之後的局，過去的局不會重新計算。</p>
+      <div class="row2">
+        <button type="button" class="btn" data-action="rules-cancel">取消</button>
+        <button type="button" class="btn btn-accent" id="rulesApply" data-action="rules-apply" style="margin-top:0;width:100%">套用</button>
       </div>
     </div>
   </div>
